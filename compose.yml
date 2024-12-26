@@ -1,0 +1,51 @@
+services:
+  # Spanner
+  spanner:
+    image: gcr.io/cloud-spanner-emulator/emulator:1.2.0
+    platform: linux/amd64
+    ports:
+        - "9010:9010"
+        - "9020:9020"
+
+  # Init (Create Instance)
+  gcloud-spanner-init:
+    image: gcr.io/google.com/cloudsdktool/cloud-sdk:332.0.0-slim
+    command: |
+      bash -c 'sleep 10 &&
+              gcloud config set auth/disable_credentials true &&
+              gcloud config set project $${PROJECT_ID} &&
+              gcloud config set api_endpoint_overrides/spanner $${SPANNER_EMULATOR_URL} &&
+              gcloud config set auth/disable_credentials true &&
+              gcloud spanner instances create $${INSTANCE_NAME} --config=emulator-config --description=Emulator --nodes=1'
+    depends_on:
+      - spanner
+    environment:
+      PROJECT_ID: "test-project"
+      SPANNER_EMULATOR_URL: "http://spanner:9020/"
+      INSTANCE_NAME: "test-instance"
+
+  # DB Migration (Create Table)
+  wrench-create:
+    image: mercari/wrench:1.0.3
+    platform: linux/amd64
+    command: "create --directory /ddl"
+    depends_on:
+      - spanner
+      - gcloud-spanner-init
+    environment:
+      SPANNER_PROJECT_ID: "test-project"
+      SPANNER_INSTANCE_ID: "test-instance"
+      SPANNER_DATABASE_ID: "test-database"
+      SPANNER_EMULATOR_HOST: "spanner:9010"
+      SPANNER_EMULATOR_URL: "http://spanner:9020/"
+    volumes:
+      - ./migrations/ddl:/ddl
+    restart: on-failure
+
+  # CLI
+  spanner-cli:
+    image: sjdaws/spanner-cli:v1.0.0
+    platform: linux/amd64
+    environment:
+      SPANNER_EMULATOR_HOST: "spanner:9010"
+    command: ['sh', '-c', 'echo this container keep running && tail -f /dev/null']
